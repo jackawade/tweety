@@ -10,6 +10,7 @@ from .exceptions_ import GuestTokenNotFound, UnknownError, UserNotFound, Invalid
 from .types.n_types import GenericError
 from .utils import custom_json, create_request_id
 from .builder import UrlBuilder
+import datetime
 
 s.Response.json_ = custom_json
 
@@ -35,8 +36,17 @@ class Request:
     def set_user(self, user):
         self.user = user
 
-    def _wait_for_rate_limit(self, url):
-        raise NotImplemented
+    def _wait_for_rate_limit(self, func):
+        rate_limit_info = self._limits.get(func)
+        if rate_limit_info:
+            remaining = rate_limit_info.get('limit_remaining', 1)
+            reset_time = rate_limit_info.get('limit_reset')
+            if remaining == 0 and reset_time:
+                current_time = int(time.time())
+                sleep_time = reset_time - current_time + 1  # add 1 to ensure the rate limit has reset
+                if sleep_time > 0:
+                    print(f"Rate limit hit, sleeping for {sleep_time} seconds.")
+                    time.sleep(sleep_time)
 
     def _update_rate_limit(self, response, func):
         url = response.url
@@ -49,6 +59,12 @@ class Request:
                 limit_reset=int(headers['x-rate-limit-reset']),
                 limit_remaining=int(headers['x-rate-limit-remaining'])
             )
+            # Print rate limit information to the console
+            print(f"Function: {func}")
+            print(f"Path: {url.path}")
+            print(f"Rate Limit Remaining: {headers['x-rate-limit-remaining']}")
+            reset_time = datetime.datetime.utcfromtimestamp(int(headers['x-rate-limit-reset']))
+            print(f"Rate Limit Reset Time: {reset_time}")
 
     def __get_response__(self, return_raw=False, ignoreNoneData=False, **request_data):
 
@@ -60,6 +76,7 @@ class Request:
             return None
 
         if not response_json:
+            print(f"Unknown response: {response}")
             raise UnknownError(
                 error_code=500,
                 error_name="Server Error",
@@ -129,13 +146,22 @@ class Request:
         return response
 
     def perform_search(self, keyword, cursor, filter_):
+        # Get the date for 24 hours ago
+        since_date = (datetime.datetime.now() - datetime.timedelta(days=1)).strftime('%Y-%m-%d')
+
         if keyword.startswith("#"):
             keyword = f"%23{keyword[1:]}"
 
-        request_data = self.__builder.search(keyword, cursor, filter_)
-        # del request_data['headers']['content-type']
-        request_data['headers']['referer'] = f"https://twitter.com/search?q={keyword}"
+        # Add your filters to the keyword
+        keyword += f" min_faves:700 since:{since_date}"
 
+        # Build the request data
+        request_data = self.__builder.search(keyword, cursor, filter_)
+
+        # Update the referer to include the top tweets filter
+        request_data['headers']['referer'] = f"https://twitter.com/search?q={keyword}&src=typed_query&f=top"
+
+        # Get the response
         response = self.__get_response__(**request_data)
         return response
 
