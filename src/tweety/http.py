@@ -67,9 +67,13 @@ class Request:
             print(f"Rate Limit Reset Time: {reset_time}")
 
     def __get_response__(self, return_raw=False, ignoreNoneData=False, **request_data):
-
+        # Get the function name of the calling function
+        func_name = inspect.stack()[1][3]
+        # Wait for rate limit reset if necessary
+        self._wait_for_rate_limit(func_name)
+        
         response = self.__session.request(**request_data)
-        self._update_rate_limit(response, inspect.stack()[1][3])
+        self._update_rate_limit(response, func_name)
 
         response_json = response.json_() # noqa
         if ignoreNoneData and len(response.text) == 0:
@@ -159,7 +163,7 @@ class Request:
         request_data = self.__builder.search(keyword, cursor, filter_)
 
         # Update the referer to include the top tweets filter
-        request_data['headers']['referer'] = f"https://twitter.com/search?q={keyword}&src=typed_query&f=top"
+        request_data['headers']['referer'] = f"https://twitter.com/search?q={keyword}"
 
         # Get the response
         response = self.__get_response__(**request_data)
